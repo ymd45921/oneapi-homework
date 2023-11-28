@@ -5,5 +5,12 @@
     },
     "cmake.buildDirectory": "${workspaceFolder}/build",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-    "cmake.options.statusBarVisibility": "icon"
+    "cmake.options.statusBarVisibility": "icon",
+    "C_Cpp.errorSquiggles": "disabled",
+    "files.associations": {
+        "*.toml": "toml",
+        "variant": "cpp",
+        "thread": "cpp",
+        "random": "cpp"
+    }
 }
