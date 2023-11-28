@@ -1,0 +1,9 @@
+{
+    "cmake.configureOnOpen": true,
+    "cmake.configureSettings": {
+        "CMAKE_CXX_STANDARD": 17,
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+    },
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
+}
