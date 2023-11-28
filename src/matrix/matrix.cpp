@@ -1,5 +1,6 @@
 #include <sycl/sycl.hpp>
 #include <iostream>
+#include <algorithm>
 #include <random>
 #include <limits>
 
@@ -90,6 +91,43 @@ namespace my {
             os << "\n";
         }
     }
+
+    struct device_info {
+        std::string name;
+        sycl::device device;
+    };
+
+    struct platform_info {
+        std::string name;
+        sycl::platform platform;
+        std::vector<device_info> devices;
+    };
+
+    // 查询所有可以用来创建 sycl 队列的设备
+    std::vector<platform_info> get_devices() {
+        auto platforms = sycl::platform::get_platforms();
+        std::vector<platform_info> system(platforms.size()); 
+        std::transform(platforms.begin(), platforms.end(), system.begin(),
+                       [](sycl::platform &p) { 
+                            auto name = p.get_info<sycl::info::platform::name>();
+                            auto _devices = p.get_devices();
+                            std::vector<device_info> devices(_devices.size());
+                            std::transform(_devices.begin(), _devices.end(), devices.begin(),
+                                           [](sycl::device &d) {
+                                                return device_info{d.get_info<sycl::info::device::name>(), d};
+                                           });
+                            return platform_info{name, p, devices};
+                       });
+        return system;
+    }
+
+    // 将设备信息输出到流
+    std::ostream &operator<<(std::ostream &os, const platform_info &info) {
+        os << "Platform: " << info.name << "\n";
+        for (auto &device : info.devices)
+            os << "    Device: " << device.name << "\n";
+        return os;
+    }
 }
  
 signed main() {
@@ -100,6 +138,16 @@ signed main() {
     random_matrix(b_host, rand_float);
 
     float (*c_out)[P] = new float[M][P], c_dev[M][P];
+
+    auto info = my::get_devices();
+    std::cout << "Found " << info.size() << " platforms.\n";
+    // 输出所有可用的设备信息到文件
+    std::ofstream ofs_device("devices.txt");
+    for (auto &platform : info) {
+        using my::operator<<;
+        ofs_device << platform;
+        std::cout << platform;
+    }
 
     try {
         sycl::queue q(sycl::default_selector_v);
