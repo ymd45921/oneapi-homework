@@ -318,7 +318,6 @@ namespace my {
         explicit constexpr gaussian_kernel(const T sigma = (size - 1) / (T)6.0) {
             static_assert(size % 2 == 1, "size must be odd");
             static_assert(size >= 3, "size must be greater than or equal to 3");
-            static_assert(size <= 7, "size must be less than or equal to 7");
             static_assert(std::is_floating_point<T>::value, "T must be floating point");
             static_assert(std::numeric_limits<T>::is_iec559, "T must be IEEE 754 floating point");
 
@@ -347,6 +346,38 @@ namespace my {
             auto sum = std::accumulate(this->data, this->data + size * size, 0.0f);
             std::transform(this->data, this->data + size * size, this->data,
                            [=](T v) { return v / sum; });
+        }
+    };
+
+    // 定义一个锐化卷积核，使用模板元编程计算锐化卷积核的值
+    template <typename T, int size>
+    struct sharpen_kernel : kernel<T, size> {
+        explicit constexpr sharpen_kernel(const T alpha = 0.5) {
+            static_assert(size % 2 == 1, "size must be odd");
+            static_assert(size >= 3, "size must be greater than or equal to 3");
+            static_assert(std::is_floating_point<T>::value, "T must be floating point");
+            static_assert(std::numeric_limits<T>::is_iec559, "T must be IEEE 754 floating point");
+
+            const auto offset = size / 2;
+            [[maybe_unused]] const auto offset2 = offset * offset;
+
+            const auto get_offset = [](int i, int j) { return (i + offset) * size + j + offset; };
+
+            const auto get_value = [=](int i, int j) {
+                if (i == 0 && j == 0)
+                    return (T)1 + alpha;
+                else if (i == 0 && j == 1)
+                    return -alpha;
+                else if (i == 1 && j == 0)
+                    return -alpha;
+                else
+                    return (T)0;
+            };
+
+            for (int i = -offset; i <= offset; i++) {
+                for (int j = -offset; j <= offset; j++)
+                    this->data[get_offset(i, j)] = get_value(i, j);
+            }
         }
     };
 }
