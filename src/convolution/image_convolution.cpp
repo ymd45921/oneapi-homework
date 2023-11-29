@@ -4,98 +4,144 @@
 
 #include "my.hpp"
 
-// 简单的图像卷积核函数
-void convolution(const std::vector<float>& input, std::vector<float>& output,
-                 const std::vector<float>& kernel, int width, int height, int kernelSize) {
-    // 初始化 SYCL 环境
-    sycl::queue queue(sycl::default_selector_v);
+// #define coordinate_fix
 
-    // 分配设备内存
-    sycl::buffer<float, 2> bufferInput(input.data(), sycl::range<2>(width, height));
-    sycl::buffer<float, 2> bufferOutput(output.data(), sycl::range<2>(width, height));
-    sycl::buffer<float, 1> bufferKernel(kernel.data(), sycl::range<1>(kernelSize));
-
-    // 启动 kernel
-    queue.submit([&](sycl::handler& cgh) {
-        auto accessorInput = bufferInput.get_access<sycl::access::mode::read>(cgh);
-        auto accessorOutput = bufferOutput.get_access<sycl::access::mode::write>(cgh);
-        auto accessorKernel = bufferKernel.get_access<sycl::access::mode::read>(cgh);
-
-        cgh.parallel_for<class ConvolutionKernel>(sycl::range<2>(width, height), [=](sycl::item<2> item) {
-            int x = item.get_id(0);
-            int y = item.get_id(1);
-
-            float sum = 0.0f;
-            for (int i = 0; i < kernelSize; ++i) {
-                for (int j = 0; j < kernelSize; ++j) {
-                    int inputX = x + i - kernelSize / 2;
-                    int inputY = y + j - kernelSize / 2;
+template <typename T, int N>
+my::image_data_rgba host_convolution(int width, int height, const my::image_data_rgba &input, 
+                                     const my::kernel<T, N>& kernel, bool normalize = true) {
+    my::image_data_rgba output(width * height);
+    for (int x = 0; x < width; ++x) {
+        for (int y = 0; y < height; ++y){
+            float sum_r = 0.0f, sum_g = 0.0f, sum_b = 0.0f, sum_a = 0.0f;
+            float sum_weight = 0.0f;
+            const auto kernel_size = kernel.get_size(), kernel_offset = kernel_size / 2;
+            auto id = y * width + x;
+            for (int i = 0; i < kernel_size; ++i) {
+                for (int j = 0; j < kernel_size; ++j) {
+                    int inputX = x + i - kernel_offset;
+                    int inputY = y + j - kernel_offset;
+                    int inputID = inputY * width + inputX;
 
                     if (inputX >= 0 && inputX < width && inputY >= 0 && inputY < height) {
-                        sum += accessorInput[{(unsigned)inputX, (unsigned)inputY}] * accessorKernel[i * kernelSize + j];
+                        auto weight = kernel.data[i * kernel_size + j];
+                        sum_r += input[inputID].r * weight;
+                        sum_g += input[inputID].g * weight;
+                        sum_b += input[inputID].b * weight;
+                        sum_a += input[inputID].a * weight;
+                        sum_weight += weight;
                     }
                 }
             }
-
-            accessorOutput[item] = sum;
-        });
-    });
-
-    // 等待计算完成
-    queue.wait();
+            if (normalize)
+                sum_r /= sum_weight, sum_g /= sum_weight, sum_b /= sum_weight, sum_a /= sum_weight;
+            output[id] = my::make_pixel_rgba(sum_r, sum_g, sum_b, sum_a);
+        #ifdef coordinate_fix
+            output[id] = my::make_pixel_rgba(x * 255.f / width, y * 255.f / height, 0.f, 255.f);
+        #endif
+        }
+    }
+    return output;
 }
 
 int main() {
     // 图像参数
-    const int width = 4;
-    const int height = 4;
-
-    // 输入图像
-    std::vector<float> input = {
-        1.0f, 2.0f, 3.0f, 4.0f,
-        5.0f, 6.0f, 7.0f, 8.0f,
-        9.0f, 10.0f, 11.0f, 12.0f,
-        13.0f, 14.0f, 15.0f, 16.0f
-    };
+    // todo: 使用 sycl 提供的图像类和 host 图像类
+    constexpr auto filename = workspace_root "img/IMG_2881.JPG";
+    my::image img(filename, my::image::channel::rgba);
+    if (img.get_channels() != my::image::channel::rgba) {
+        std::cout << "Warning: image channel is not rgba" << std::endl;
+    } else {
+        std::cout << "Image channel is rgba" << std::endl;
+    }
+    auto width = img.get_width(), height = img.get_height();
+    // hint: 已经从 stbi 布局转换为二维数组布局
+    auto input = img.get_data_rgba();
+    std::cout << "Image size: " << width << " * " << height << std::endl;
 
     // 卷积核
-    const int kernelSize = 3;
-    std::vector<float> kernel = {
-        1.0f, 2.0f, 1.0f,
-        0.0f, 0.0f, 0.0f,
-        -1.0f, -2.0f, -1.0f
-    };
+    // my::gaussian_kernel<float, 7> kernel;
+    my::kernel<float, 11> kernel(1.f / 121);
 
     // 输出图像
-    std::vector<float> output(width * height, 0.0f);
+    my::image_data_rgba output(width * height);
 
     // 执行并行卷积
-    convolution(input, output, kernel, width, height, kernelSize);
+    try {
+        sycl::queue queue(sycl::default_selector_v);
+        
+        // hint: sycl::buffer<T, 2> 等同于 T[][]；而 wxh 的图像数据应当使用二维数组 [h][w] 表示
+        sycl::buffer<my::pixel_rgba, 2> buffer_input(input.data(), sycl::range<2>(height, width));
+        sycl::buffer<my::pixel_rgba, 2> buffer_output(output.data(), sycl::range<2>(height, width));
+        sycl::buffer<float, 2> buffer_kernel(kernel.get_data(), sycl::range<2>(kernel.get_size(), kernel.get_size()));
+
+        queue.submit([&](sycl::handler& cgh) {
+            auto accessor_input = buffer_input.get_access<sycl::access::mode::read>(cgh);
+            auto accessor_output = buffer_output.get_access<sycl::access::mode::write>(cgh);
+            auto accessor_kernel = buffer_kernel.get_access<sycl::access::mode::read>(cgh);
+
+            // hint: sycl::handle::parallel_for 的第一个类型参数是用户指定的 kernel 名称，程序内需要保证唯一
+            cgh.parallel_for<class ConvolutionKernel>(sycl::range<2>(height, width), [=](sycl::item<2> item) {
+                
+                int y = item.get_id(0);
+                int x = item.get_id(1);
+
+                float sum_r = 0.0f, sum_g = 0.0f, sum_b = 0.0f, sum_a = 0.0f;
+                float sum_weight = 0.0f;
+                const auto kernel_size = kernel.get_size(), kernel_offset = kernel_size / 2;
+                for (int i = 0; i < kernel_size; ++i) {
+                    for (int j = 0; j < kernel_size; ++j) {
+                        int inputX = x + i - kernel_offset;
+                        int inputY = y + j - kernel_offset;
+                        auto inputCoord = sycl::id<2>{(unsigned)inputY, (unsigned)inputX};
+
+                        if (inputX >= 0 && inputX < width && inputY >= 0 && inputY < height) {
+                            auto weight = accessor_kernel[{(unsigned)i, (unsigned)j}];
+                            sum_r += accessor_input[inputCoord].r * weight;
+                            sum_g += accessor_input[inputCoord].g * weight;
+                            sum_b += accessor_input[inputCoord].b * weight;
+                            sum_a += accessor_input[inputCoord].a * weight;
+                            sum_weight += weight;
+                        }
+                    }
+                }
+                sum_r /= sum_weight, sum_g /= sum_weight, sum_b /= sum_weight, sum_a /= sum_weight;
+                accessor_output[item] = my::make_pixel_rgba(sum_r, sum_g, sum_b, sum_a);
+            #ifdef coordinate_fix
+                accessor_output[item] = my::make_pixel_rgba((float)x / width * 255.f, (float)y / height * 255.f, 0.f, 255.f);
+            #endif
+            });
+        });
+        queue.wait();
+
+    } catch (sycl::exception& e) {
+        std::cout << e.what() << std::endl;
+        return 1;
+    }
 
     // 打印结果
     std::cout << "Input Image:" << std::endl;
-    for (int i = 0; i < height; ++i) {
-        for (int j = 0; j < width; ++j) {
-            std::cout << input[i * width + j] << " ";
-        }
-        std::cout << std::endl;
-    }
+    std::cout << "  Path: " << filename << std::endl;
+    std::cout << "  Width: " << width << std::endl;
+    std::cout << "  Height: " << height << std::endl;
+    std::cout << "  Channels: " << (int)img.get_channels() << std::endl;
 
+    using my::operator<<;
     std::cout << "\nConvolution Kernel:" << std::endl;
-    for (int i = 0; i < kernelSize; ++i) {
-        for (int j = 0; j < kernelSize; ++j) {
-            std::cout << kernel[i * kernelSize + j] << " ";
-        }
-        std::cout << std::endl;
-    }
+    std::cout << "  Size: " << kernel.get_size() << std::endl;
+    std::cout << kernel;
 
+    my::image out_img(output.data(), width, height);
+    constexpr auto out_file = "out.png";
+    out_img.save_png(out_file);
     std::cout << "\nOutput Image:" << std::endl;
-    for (int i = 0; i < height; ++i) {
-        for (int j = 0; j < width; ++j) {
-            std::cout << output[i * width + j] << " ";
-        }
-        std::cout << std::endl;
-    }
+    std::cout << "  Path: " << out_file << std::endl;
 
+    // todo: 使用计时器
+    std::cout << "\nHost Convolution processing..." << std::endl;
+    auto host_output = host_convolution(width, height, input, kernel, true);
+    my::image host_out_img(host_output.data(), width, height);
+    constexpr auto host_out_file = "host_out.png";
+    host_out_img.save_png(host_out_file);
+    std::cout << "  Path: " << host_out_file << std::endl;
     return 0;
 }

@@ -141,6 +141,8 @@ namespace my {
         unsigned char data[4];
     };
 
+    using image_data_rgba = std::vector<pixel_rgba>;
+
     std::ostream &operator<<(std::ostream &os, const pixel_rgba &pixel) {
         if (!os.dec) {  // 将 rgba 输出为 #RRGGBBAA 的形式
             os << "#";
@@ -158,9 +160,28 @@ namespace my {
         return os;
     }
 
+    pixel_rgba make_pixel_rgba(float r, float g, float b, float a = 255) {
+        pixel_rgba pixel;
+        pixel.r = static_cast<unsigned char>(std::round(r));
+        pixel.g = static_cast<unsigned char>(std::round(g));
+        pixel.b = static_cast<unsigned char>(std::round(b));
+        pixel.a = static_cast<unsigned char>(std::round(a));    
+        return pixel;
+    }
+
+    pixel_rgba make_pixel_rgba(int r, int g, int b, int a = 255) {
+        pixel_rgba pixel;
+        pixel.r = static_cast<unsigned char>(r);
+        pixel.g = static_cast<unsigned char>(g);
+        pixel.b = static_cast<unsigned char>(b);
+        pixel.a = static_cast<unsigned char>(a);   
+        return pixel;
+    }
+
     // 定义一个 stb_image 的 RAII 包装类
     class image {
-        int width, height, channels;
+
+        int width, height, fact_channels;
         unsigned char *data;
 
     public:
@@ -172,10 +193,30 @@ namespace my {
             rgba = 4
         };
 
+    private:
+        channel data_channels;
+
+    public:
+        // hint: 即使指明了 req，stbi_load 返回的通道数仍然是实际的通道数
+        // ? 即使指明了 req，stbi_load 也不一定会返回对应的通道数，因此需要使用 stbi__convert_format 进行转换
         explicit image(const char *filename, channel req = channel::undefined) {
-            data = stbi_load(filename, &width, &height, &channels, static_cast<int>(req));
+            data = stbi_load(filename, &width, &height, &fact_channels, static_cast<int>(req));
             if (!data)
                 throw std::runtime_error("Failed to load image");
+            data_channels = req == channel::undefined ? static_cast<channel>(fact_channels) : req;
+        }
+
+        image(int width, int height, channel req = channel::rgba)
+            : width(width), height(height), fact_channels(static_cast<int>(req)), data_channels(req) {
+            if (req == channel::undefined)
+                throw std::runtime_error("Invalid new image channels");
+            data = (unsigned char *)stbi__malloc(width * height * fact_channels);
+        }
+
+        image(const pixel_rgba *pixels, int width, int height)
+            : width(width), height(height), fact_channels(4), data_channels(channel::rgba) {
+            data = (unsigned char *)stbi__malloc(width * height * fact_channels);
+            memcpy(data, pixels, width * height * sizeof(pixel_rgba));
         }
 
         ~image() { stbi_image_free(data); }
@@ -184,37 +225,58 @@ namespace my {
 
         int get_height() const { return height; }
 
-        channel get_channels() const { return static_cast<channel>(channels); }
+        channel get_channels() const { return data_channels; }
 
         const unsigned char *get_raw() const { return data; }
 
-        std::pair<std::shared_ptr<pixel_rgba[]>, std::size_t> get_rgba() const {
+        void save_png(const char *filename) const {
+            int channels = static_cast<int>(data_channels);
+            if (!stbi_write_png(filename, width, height, channels, data, width * channels))
+                throw std::runtime_error("Failed to write image");
+        }
+
+        int get_index(int x, int y) const { return y * width + x; }
+
+        int get_offset(int x, int y) const { return get_index(x, y) * (int)data_channels; }
+
+        // hint: 很简单的道理 —— wxh 的图片其实有 h 行 w 列，写成二维数组是 [h][w]；sycl::range 也只是二维数组布局
+        // 但是作为图片，我们更习惯于 [w][h] 的布局。wxh 仍然具有意义
+        image_data_rgba get_data_rgba() const {
             auto size = width * height;
-            std::shared_ptr<pixel_rgba[]> pixels(new pixel_rgba[size]);
-            for (int i = 0; i < size; i++) {
-                if (channels < 3) {
-                    pixels[i].r = pixels[i].g = pixels[i].b = data[i * channels];
-                    pixels[i].a = channels == 2 ? data[i * channels + 1] : 255;
-                } else {
-                    pixels[i].r = data[i * channels];
-                    pixels[i].g = data[i * channels + 1];
-                    pixels[i].b = data[i * channels + 2];
-                    pixels[i].a = channels == 4 ? data[i * channels + 3] : 255;
+            auto channels = (int)data_channels;
+            image_data_rgba pixels(size);
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < height; y++) {
+                    auto i = get_index(x, y), j = i;
+                    if (channels < 3) {
+                        pixels[j].r = pixels[i].g = pixels[i].b = data[i * channels];
+                        pixels[j].a = channels == 2 ? data[i * channels + 1] : 255;
+                    } else {
+                        pixels[j].r = data[i * channels];
+                        pixels[j].g = data[i * channels + 1];
+                        pixels[j].b = data[i * channels + 2];
+                        pixels[j].a = channels == 4 ? data[i * channels + 3] : 255;
+                    }
                 }
             }
-            return {pixels, size};
+            return pixels;
         }
     };
 
     // 定义一个卷积核
     template <typename T, int size>
     struct kernel {
-        T data[size * size];
+        T data[size * size]{};
 
         constexpr kernel() = default;
 
         constexpr kernel(std::initializer_list<T> list) {
+            std::fill(data, data + size * size, T(0));
             std::copy(list.begin(), list.end(), data);
+        }
+
+        constexpr kernel(T _fill) {
+            std::fill(data, data + size * size, _fill);
         }
 
         // 用随机数填充卷积核
@@ -232,30 +294,45 @@ namespace my {
             }
             return os;
         }
+
+        // 归一化卷积核，如果卷积核的和为 0，则不进行归一化
+        void normalize() {
+            auto sum = std::accumulate(data, data + size * size, 0.0f);
+            if (sum != 0.0f)
+                std::transform(data, data + size * size, data,
+                               [=](T v) { return v / sum; });
+        }
+
+        void fill(T value) {
+            std::fill(data, data + size * size, value);
+        }
+
+        constexpr int get_size() const { return size; }
+
+        constexpr T *get_data() { return data; }
     };
 
     // 定义一个高斯卷积核，使用模板元编程计算高斯卷积核的值
     template <typename T, int size>
     struct gaussian_kernel : kernel<T, size> {
-        constexpr gaussian_kernel() {
+        explicit constexpr gaussian_kernel(const T sigma = (size - 1) / (T)6.0) {
             static_assert(size % 2 == 1, "size must be odd");
             static_assert(size >= 3, "size must be greater than or equal to 3");
             static_assert(size <= 7, "size must be less than or equal to 7");
             static_assert(std::is_floating_point<T>::value, "T must be floating point");
             static_assert(std::numeric_limits<T>::is_iec559, "T must be IEEE 754 floating point");
 
-            constexpr auto sigma = (size - 1) / 6.0f;
-            constexpr auto sigma2 = sigma * sigma;
-            constexpr auto sigma4 = sigma2 * sigma2;
-            constexpr auto sigma6 = sigma4 * sigma2;
-            constexpr auto coeff = 1.0f / (2.0f * M_PI * sigma6);
+            const auto sigma2 = sigma * sigma;
+            const auto sigma4 = sigma2 * sigma2;
+            const auto sigma6 = sigma4 * sigma2;
+            const auto coeff = 1.0f / (2.0f * M_PI * sigma6);
 
-            constexpr auto offset = size / 2;
-            [[maybe_unused]] constexpr auto offset2 = offset * offset;
+            const auto offset = size / 2;
+            [[maybe_unused]] const auto offset2 = offset * offset;
 
-            constexpr auto get_offset = [](int i, int j) { return (i + offset) * size + j + offset; };
+            const auto get_offset = [](int i, int j) { return (i + offset) * size + j + offset; };
 
-            constexpr auto get_value = [=](int i, int j) {
+            const auto get_value = [=](int i, int j) {
                 auto x = i - offset;
                 auto y = j - offset;
                 return coeff * std::exp(-(x * x + y * y) / (2.0f * sigma2));
