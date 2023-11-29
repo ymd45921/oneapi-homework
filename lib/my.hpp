@@ -143,6 +143,10 @@ namespace my {
 
     using image_data_rgba = std::vector<pixel_rgba>;
 
+    bool operator==(const pixel_rgba &a, const pixel_rgba &b) {
+        return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+    }
+
     std::ostream &operator<<(std::ostream &os, const pixel_rgba &pixel) {
         if (!os.dec) {  // 将 rgba 输出为 #RRGGBBAA 的形式
             os << "#";

@@ -66,9 +66,24 @@ int main() {
     // 输出图像
     my::image_data_rgba output(width * height);
 
+    // 打印信息
+    std::cout << "\nInput Image:" << std::endl;
+    std::cout << "  Path: " << filename << std::endl;
+    std::cout << "  Width: " << width << std::endl;
+    std::cout << "  Height: " << height << std::endl;
+    std::cout << "  Channels: " << (int)img.get_channels() << std::endl;
+    using my::operator<<;
+    std::cout << "\nConvolution Kernel:" << std::endl;
+    std::cout << "  Size: " << kernel.get_size() << std::endl;
+    if (kernel.get_size() < 10) std::cout << kernel;
+    else std::cout << "  Too large to print." << std::endl;
+
+    auto start_device_timer = std::chrono::steady_clock::now();
     // 执行并行卷积
     try {
         sycl::queue queue(sycl::default_selector_v);
+        std::cout << "\nRunning on device: "
+                  << queue.get_device().get_info<sycl::info::device::name>() << "\n";
         
         // hint: sycl::buffer<T, 2> 等同于 T[][]；而 wxh 的图像数据应当使用二维数组 [h][w] 表示
         sycl::buffer<my::pixel_rgba, 2> buffer_input(input.data(), sycl::range<2>(height, width));
@@ -118,31 +133,33 @@ int main() {
         std::cout << e.what() << std::endl;
         return 1;
     }
+    auto end_device_timer = std::chrono::steady_clock::now();
 
     // 打印结果
-    std::cout << "Input Image:" << std::endl;
-    std::cout << "  Path: " << filename << std::endl;
-    std::cout << "  Width: " << width << std::endl;
-    std::cout << "  Height: " << height << std::endl;
-    std::cout << "  Channels: " << (int)img.get_channels() << std::endl;
-
-    using my::operator<<;
-    std::cout << "\nConvolution Kernel:" << std::endl;
-    std::cout << "  Size: " << kernel.get_size() << std::endl;
-    std::cout << kernel;
-
     my::image out_img(output.data(), width, height);
     constexpr auto out_file = "out.png";
     out_img.save_png(out_file);
     std::cout << "\nOutput Image:" << std::endl;
     std::cout << "  Path: " << out_file << std::endl;
+    std::cout << "  Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_device_timer - start_device_timer).count() << "ms" << std::endl;
 
-    // todo: 使用计时器
     std::cout << "\nHost Convolution processing..." << std::endl;
+    auto start_host_timer = std::chrono::steady_clock::now();
     auto host_output = host_convolution(width, height, input, kernel, true);
+    auto end_host_timer = std::chrono::steady_clock::now();
     my::image host_out_img(host_output.data(), width, height);
     constexpr auto host_out_file = "host_out.png";
     host_out_img.save_png(host_out_file);
     std::cout << "  Path: " << host_out_file << std::endl;
+    std::cout << "  Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_host_timer - start_host_timer).count() << "ms" << std::endl;
+
+    using my::operator==;
+    std::cout << std::endl;
+    if (std::all_of(output.begin(), output.end(), 
+                    [&](auto &a) { return a == host_output[&a - output.data()]; })) {
+        std::cout << "Host Convolution result is the same as Device Convolution result." << std::endl;
+    } else {
+        std::cout << "Host Convolution result is not the same as Device Convolution result." << std::endl;
+    }
     return 0;
 }
