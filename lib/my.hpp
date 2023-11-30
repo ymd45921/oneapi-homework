@@ -166,19 +166,19 @@ namespace my {
 
     pixel_rgba make_pixel_rgba(float r, float g, float b, float a = 255) {
         pixel_rgba pixel;
-        pixel.r = static_cast<unsigned char>(std::round(r));
-        pixel.g = static_cast<unsigned char>(std::round(g));
-        pixel.b = static_cast<unsigned char>(std::round(b));
-        pixel.a = static_cast<unsigned char>(std::round(a));    
+        pixel.r = static_cast<unsigned char>(std::clamp(std::round(r), 0.f, 255.f));
+        pixel.g = static_cast<unsigned char>(std::clamp(std::round(g), 0.f, 255.f));
+        pixel.b = static_cast<unsigned char>(std::clamp(std::round(b), 0.f, 255.f));
+        pixel.a = static_cast<unsigned char>(std::clamp(std::round(a), 0.f, 255.f));   
         return pixel;
     }
 
     pixel_rgba make_pixel_rgba(int r, int g, int b, int a = 255) {
         pixel_rgba pixel;
-        pixel.r = static_cast<unsigned char>(r);
-        pixel.g = static_cast<unsigned char>(g);
-        pixel.b = static_cast<unsigned char>(b);
-        pixel.a = static_cast<unsigned char>(a);   
+        pixel.r = static_cast<unsigned char>(std::clamp(r, 0, 255));
+        pixel.g = static_cast<unsigned char>(std::clamp(g, 0, 255));
+        pixel.b = static_cast<unsigned char>(std::clamp(b, 0, 255));
+        pixel.a = static_cast<unsigned char>(std::clamp(a, 0, 255));   
         return pixel;
     }
 
@@ -354,11 +354,12 @@ namespace my {
     };
 
     // 定义一个锐化卷积核，使用模板元编程计算锐化卷积核的值
+    // info: 仅实现了 3x3 的拉普拉斯锐化卷积核
     template <typename T, int size>
     struct sharpen_kernel : kernel<T, size> {
-        explicit constexpr sharpen_kernel(const T alpha = 0.5) {
+        explicit constexpr sharpen_kernel(const T alpha = 1) {
             static_assert(size % 2 == 1, "size must be odd");
-            static_assert(size >= 3, "size must be greater than or equal to 3");
+            static_assert(size >= 3, "size must be equal to 3");
             static_assert(std::is_floating_point<T>::value, "T must be floating point");
             static_assert(std::numeric_limits<T>::is_iec559, "T must be IEEE 754 floating point");
 
@@ -369,13 +370,10 @@ namespace my {
 
             const auto get_value = [=](int i, int j) {
                 if (i == 0 && j == 0)
-                    return (T)1 + alpha;
-                else if (i == 0 && j == 1)
+                    return (T)1 + alpha * 4;
+                else if (i == 0 || j == 0)
                     return -alpha;
-                else if (i == 1 && j == 0)
-                    return -alpha;
-                else
-                    return (T)0;
+                else return (T)0;
             };
 
             for (int i = -offset; i <= offset; i++) {

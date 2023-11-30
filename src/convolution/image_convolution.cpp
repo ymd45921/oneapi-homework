@@ -59,9 +59,10 @@ int main() {
     std::cout << "Image size: " << width << " * " << height << std::endl;
 
     // 卷积核
-    my::gaussian_kernel<float, 19> kernel;
-    // my::kernel<float, 11> kernel(1.f / 121);
-    // my::sharpen_kernel<float, 3> kernel(0.05f);
+    // my::gaussian_kernel<float, 19> kernel;
+    // my::kernel<float, 11> kernel(1.f);
+    my::sharpen_kernel<float, 3> kernel(12);
+    kernel.normalize();
 
     // 输出图像
     my::image_data_rgba output(width * height);
