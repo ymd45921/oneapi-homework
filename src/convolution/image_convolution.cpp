@@ -43,6 +43,54 @@ my::image_data_rgba host_convolution(int width, int height, const my::image_data
     return output;
 }
 
+template <int kernel_size>
+double device_convolution(sycl::queue &queue, sycl::buffer<my::pixel_rgba, 2> &buffer_input, 
+                          sycl::buffer<my::pixel_rgba, 2> &buffer_output, 
+                          sycl::buffer<float, 2> &buffer_kernel, int width, int height,
+                          const my::kernel<float, kernel_size> &kernel) {
+    auto event = queue.submit([&](sycl::handler& cgh) {
+        auto accessor_input = buffer_input.get_access<sycl::access::mode::read>(cgh);
+        auto accessor_output = buffer_output.get_access<sycl::access::mode::write>(cgh);
+        auto accessor_kernel = buffer_kernel.get_access<sycl::access::mode::read>(cgh);
+
+        // hint: sycl::handle::parallel_for 的第一个类型参数是用户指定的 kernel 名称，程序内需要保证唯一
+        cgh.parallel_for<class ConvolutionKernel>(sycl::range<2>(height, width), [=](sycl::item<2> item) {
+            
+            int y = item.get_id(0);
+            int x = item.get_id(1);
+
+            float sum_r = 0.0f, sum_g = 0.0f, sum_b = 0.0f, sum_a = 0.0f;
+            float sum_weight = 0.0f;
+            const auto kernel_offset = kernel_size / 2;
+            for (int i = 0; i < kernel_size; ++i) {
+                for (int j = 0; j < kernel_size; ++j) {
+                    int inputX = x + i - kernel_offset;
+                    int inputY = y + j - kernel_offset;
+                    auto inputCoord = sycl::id<2>{(unsigned)inputY, (unsigned)inputX};
+
+                    if (inputX >= 0 && inputX < width && inputY >= 0 && inputY < height) {
+                        auto weight = accessor_kernel[{(unsigned)i, (unsigned)j}];
+                        sum_r += accessor_input[inputCoord].r * weight;
+                        sum_g += accessor_input[inputCoord].g * weight;
+                        sum_b += accessor_input[inputCoord].b * weight;
+                        sum_a += accessor_input[inputCoord].a * weight;
+                        sum_weight += weight;
+                    }
+                }
+            }
+            sum_r /= sum_weight, sum_g /= sum_weight, sum_b /= sum_weight, sum_a /= sum_weight;
+            accessor_output[item] = my::make_pixel_rgba(sum_r, sum_g, sum_b, sum_a);
+        #ifdef coordinate_fix
+            accessor_output[item] = my::make_pixel_rgba((float)x / width * 255.f, (float)y / height * 255.f, 0.f, 255.f);
+        #endif
+        });
+    });
+    event.wait();
+    auto start = event.template get_profiling_info<sycl::info::event_profiling::command_start>();
+    auto end = event.template get_profiling_info<sycl::info::event_profiling::command_end>();
+    return (end - start) * 1e-6;
+}
+
 int main() {
     // 图像参数
     // todo: 使用 sycl 提供的图像类和 host 图像类
@@ -54,7 +102,6 @@ int main() {
         std::cout << "Image channel is rgba" << std::endl;
     }
     auto width = img.get_width(), height = img.get_height();
-    // hint: 已经从 stbi 布局转换为二维数组布局
     auto input = img.get_data_rgba();
     std::cout << "Image size: " << width << " * " << height << std::endl;
 
@@ -79,10 +126,10 @@ int main() {
     if (kernel.get_size() < 10) std::cout << kernel;
     else std::cout << "  Too large to print." << std::endl;
 
-    auto start_device_timer = std::chrono::steady_clock::now();
+    double kernel_duration = 0, device_duration = 0;
     // 执行并行卷积
     try {
-        sycl::queue queue(sycl::default_selector_v);
+        sycl::queue queue(sycl::default_selector_v, my::prop_list);
         std::cout << "\nRunning on device: "
                   << queue.get_device().get_info<sycl::info::device::name>() << "\n";
         
@@ -90,51 +137,16 @@ int main() {
         sycl::buffer<my::pixel_rgba, 2> buffer_input(input.data(), sycl::range<2>(height, width));
         sycl::buffer<my::pixel_rgba, 2> buffer_output(output.data(), sycl::range<2>(height, width));
         sycl::buffer<float, 2> buffer_kernel(kernel.get_data(), sycl::range<2>(kernel.get_size(), kernel.get_size()));
-
-        queue.submit([&](sycl::handler& cgh) {
-            auto accessor_input = buffer_input.get_access<sycl::access::mode::read>(cgh);
-            auto accessor_output = buffer_output.get_access<sycl::access::mode::write>(cgh);
-            auto accessor_kernel = buffer_kernel.get_access<sycl::access::mode::read>(cgh);
-
-            // hint: sycl::handle::parallel_for 的第一个类型参数是用户指定的 kernel 名称，程序内需要保证唯一
-            cgh.parallel_for<class ConvolutionKernel>(sycl::range<2>(height, width), [=](sycl::item<2> item) {
-                
-                int y = item.get_id(0);
-                int x = item.get_id(1);
-
-                float sum_r = 0.0f, sum_g = 0.0f, sum_b = 0.0f, sum_a = 0.0f;
-                float sum_weight = 0.0f;
-                const auto kernel_size = kernel.get_size(), kernel_offset = kernel_size / 2;
-                for (int i = 0; i < kernel_size; ++i) {
-                    for (int j = 0; j < kernel_size; ++j) {
-                        int inputX = x + i - kernel_offset;
-                        int inputY = y + j - kernel_offset;
-                        auto inputCoord = sycl::id<2>{(unsigned)inputY, (unsigned)inputX};
-
-                        if (inputX >= 0 && inputX < width && inputY >= 0 && inputY < height) {
-                            auto weight = accessor_kernel[{(unsigned)i, (unsigned)j}];
-                            sum_r += accessor_input[inputCoord].r * weight;
-                            sum_g += accessor_input[inputCoord].g * weight;
-                            sum_b += accessor_input[inputCoord].b * weight;
-                            sum_a += accessor_input[inputCoord].a * weight;
-                            sum_weight += weight;
-                        }
-                    }
-                }
-                sum_r /= sum_weight, sum_g /= sum_weight, sum_b /= sum_weight, sum_a /= sum_weight;
-                accessor_output[item] = my::make_pixel_rgba(sum_r, sum_g, sum_b, sum_a);
-            #ifdef coordinate_fix
-                accessor_output[item] = my::make_pixel_rgba((float)x / width * 255.f, (float)y / height * 255.f, 0.f, 255.f);
-            #endif
-            });
-        });
+        
+        auto start_device_timer = std::chrono::steady_clock::now();
+        kernel_duration = device_convolution(queue, buffer_input, buffer_output, buffer_kernel, width, height, kernel);
+        auto end_device_timer = std::chrono::steady_clock::now();
+        device_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_device_timer - start_device_timer).count();
         queue.wait();
-
     } catch (sycl::exception& e) {
         std::cout << e.what() << std::endl;
         return 1;
     }
-    auto end_device_timer = std::chrono::steady_clock::now();
 
     // 打印结果
     my::image out_img(output.data(), width, height);
@@ -142,7 +154,8 @@ int main() {
     out_img.save_png(out_file);
     std::cout << "\nOutput Image:" << std::endl;
     std::cout << "  Path: " << out_file << std::endl;
-    std::cout << "  Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_device_timer - start_device_timer).count() << "ms" << std::endl;
+    std::cout << "  Time (device): " << device_duration << "ms" << std::endl;
+    std::cout << "  Time (kernel): " << kernel_duration << "ms" << std::endl;
 
     std::cout << "\nHost Convolution processing..." << std::endl;
     auto start_host_timer = std::chrono::steady_clock::now();

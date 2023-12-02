@@ -45,7 +45,7 @@ signed main() {
 
     double kernel_duration = 0;
     try {
-        sycl::queue q(sycl::default_selector_v, my::prop_list);
+        sycl::queue q(my::device_selector("Intel(R)"), my::prop_list);
         std::cout << "Running on device: "
                   << q.get_device().get_info<sycl::info::device::name>() << "\n";
 
