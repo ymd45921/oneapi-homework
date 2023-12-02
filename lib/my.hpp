@@ -9,6 +9,7 @@
 #include <random>
 #include <limits>
 #include <memory>
+#include <optional>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -382,6 +383,42 @@ namespace my {
             }
         }
     };
+
+    // 尽量选择指定名称的设备
+    class device_selector {
+        // sycl::device_selector 的已经被 SYCL2020 弃用；无需再继承自 sycl::device_selector
+
+        std::string name;
+
+    public:
+        explicit device_selector(const std::string &name) : name(name) {}
+
+        int operator()(const sycl::device &device) const {  // override
+            auto &&current = device.get_info<sycl::info::device::name>();
+            if (current == name)
+                return std::numeric_limits<int>::max();
+            int rating = 0;
+            if (current.find(name) != std::string::npos) rating += 1000;
+            if (device.is_gpu()) rating += 100;
+            if (device.is_cpu()) rating += 10;
+            if (device.is_accelerator()) rating += 1;
+            return rating;    
+        }
+    };
+
+    void print_platforms(std::optional<std::string> filename = std::nullopt) {
+        auto info = my::get_devices();
+        std::ofstream ofs_device(filename.value_or("device.txt"));
+        std::cout << "Found " << info.size() << " platforms.\n";
+        for (auto &platform : info) {
+                using my::operator<<;
+                ofs_device << platform;
+                std::cout << platform;
+        }
+        std::cout << std::endl;
+    }
+
+    const sycl::property_list prop_list{sycl::property::queue::enable_profiling()};
 }
 
 #endif /* OneAPI_Homework_my_hpp */
