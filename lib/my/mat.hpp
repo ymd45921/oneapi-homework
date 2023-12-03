@@ -68,6 +68,19 @@ namespace my {
             _data = new T[M][N];
         }
 
+        mat(T value) {
+            _data = new T[M][N];
+            fill(value);
+        }
+
+        mat(T *data, std::size_t size = sizeof(T) * M * N) {
+            if (data == nullptr) _data = nullptr;
+            else {
+                _data = new T[M][N];
+                std::memcpy(_data, data, size);
+            }
+        }
+
         mat(const T (&matrix)[M][N]) {
             _data = new T[M][N];
             std::memcpy(_data, matrix, sizeof(T) * M * N);
@@ -149,15 +162,7 @@ namespace my {
         }
 
         std::ostream &operator<<(std::ostream &os) const {
-            os << "my::mat(" << M << ", " << N << ") [\n";
-            for (int i = 0; i < M; i++) {
-                os << "  ";
-                for (int j = 0; j < N; j++)
-                    os << _data[i][j] << " ";
-                os << "\n";
-            }
-            os << "]";
-            return os;
+            return print_to(os);
         }
 
         T operator()(int i, int j) const {
@@ -247,14 +252,15 @@ namespace my {
         }
 
         std::ostream &print_to(std::ostream &os) const {
-            os << "my::mat(" << M << ", " << N << ") [\n";
+            os << "my::mat(" << M << ", " << N << ") [";
+            if (_data == nullptr)
+                return os << " null ]";
             for (int i = 0; i < M; i++) {
-                os << "  ";
+                os << "\n  ";
                 for (int j = 0; j < N; j++)
                     os << _data[i][j] << " ";
-                os << "\n";
             }
-            return os << "]";
+            return os << "\n]";
         }
 
         mat<T, N, M> operator!() const {    // transpose
