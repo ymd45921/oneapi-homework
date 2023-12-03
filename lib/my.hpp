@@ -21,9 +21,8 @@ namespace my {
     template <typename T>
     struct rand {
 
-        // 使用 C++11 的随机数引擎生成随机数
         std::default_random_engine e;
-        std::uniform_real_distribution<T> u;
+        std::conditional_t<std::is_floating_point_v<T>, std::uniform_real_distribution<T>, std::uniform_int_distribution<T>> u;
 
         rand(T min, T max) : u(min, max) {}
 
@@ -47,6 +46,17 @@ namespace my {
             for (int j = 0; j < b; j++)
                 matrix[i][j] = rand();
         }
+    }
+
+    // 使用上面的随机数生成器生成长度为 n 的随机向量；数字类型由模板参数指定
+    template <typename T>
+    std::vector<T> random_vector(int n, std::optional<rand<T>> rand = std::nullopt) {
+        if (!rand.has_value()) {
+            rand = my::rand<T>(-n, n);
+        }
+        std::vector<T> vector(n);
+        std::generate(vector.begin(), vector.end(), *rand);
+        return vector;
     }
 
     // Host 暴力运算矩阵乘法
