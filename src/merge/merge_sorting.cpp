@@ -79,7 +79,7 @@ int main() {
         sycl::queue queue(sycl::default_selector_v, my::prop_list);
         sycl::buffer<int> buffer(data.data(), sycl::range<1>(size));
         auto device_start = std::chrono::high_resolution_clock::now();
-        auto kernel_duration = praallel_merge_sort(queue, buffer, size);
+        auto kernel_duration = parallel_merge_sort(queue, buffer, size);
         auto device_end = std::chrono::high_resolution_clock::now();
         auto device_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(device_end - device_start).count() * 1e-6;
         std::cout << "Device duration: " << device_duration << " ms\n";
