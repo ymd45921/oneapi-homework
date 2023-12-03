@@ -6,9 +6,9 @@
 
 constexpr auto matrix_unit_size = 256;
 constexpr auto matrix_size = matrix_unit_size << 3;
-constexpr auto M = matrix_size >> 3;
-constexpr auto N = matrix_size >> 2;
-constexpr auto P = matrix_size >> 1;       
+constexpr auto M = matrix_size;
+constexpr auto N = matrix_size;
+constexpr auto P = matrix_size;       
 
 double kernel(sycl::queue &q, sycl::buffer<float, 2> &a_buf, sycl::buffer<float, 2> &b_buf, 
             sycl::buffer<float, 2> &c_buf) {
