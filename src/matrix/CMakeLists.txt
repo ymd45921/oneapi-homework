@@ -1,7 +1,7 @@
 set(target_prefix ${CMAKE_PROJECT_NAME})
 set(target_name "matrix")
 set(target_fullname "${target_prefix}_${target_name}")
-set(taregt_source_files matrix.cpp)
+set(taregt_source_files matrix_multiplication.cpp)
 
 # Let icpx find sycl includes.
 set(target_compile_flags "-fsycl -Wall")

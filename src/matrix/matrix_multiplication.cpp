@@ -96,7 +96,7 @@ signed main() {
         sycl::buffer c_buf(c_out.data(), sycl::range(M, P));
         sycl::buffer c_buf2(c_out2.data(), sycl::range(M, P));
         std::cout << "Problem size: " << "c[" << M << "][" << P << "] = a[" 
-                  << M << "][" << N << "] * b[" << N << "][" << P << "]\n";
+                  << M << "][" << N << "] * b[" << N << "][" << P << "]\n\n";
 
         q.submit([&](sycl::handler &h) {
             sycl::accessor a(a_buf, h, sycl::write_only);
@@ -115,6 +115,7 @@ signed main() {
             });
         });
 
+        std::cout << "Running on device...\n";
         auto start = std::chrono::high_resolution_clock::now();
         auto kernel_duration = kernel(q, a_buf, b_buf, c_buf);
         auto end = std::chrono::high_resolution_clock::now();
@@ -122,7 +123,7 @@ signed main() {
         std::cout << "Device duration: " << duration << " ms\n";
         std::cout << "Kernel duration: " << kernel_duration << " ms\n" << std::endl;
 
-        std::cout << "\nRunning on device (Tiled)...\n";
+        std::cout << "Running on device (Tiled)...\n";
         start = std::chrono::high_resolution_clock::now();
         kernel_duration = kernel2(q, a_buf, b_buf, c_buf2);
         end = std::chrono::high_resolution_clock::now();
