@@ -1,6 +1,8 @@
 #include <sycl/sycl.hpp>
 #include <iostream>
-#include <my.hpp>
+
+#include "my.hpp"
+#include "my/mat.hpp"
 
 constexpr auto matrix_unit_size = 256;
 constexpr auto matrix_size = matrix_unit_size << 3;
