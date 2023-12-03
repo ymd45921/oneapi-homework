@@ -30,6 +30,9 @@ namespace my {
     };
 
     template <typename T>
+    int sgn(T val) { return (T(0) < val) - (val < T(0)); }
+
+    template <typename T>
     struct equal {
 
         T tolerance;
@@ -37,6 +40,8 @@ namespace my {
         equal(T eps = std::numeric_limits<T>::epsilon()) : tolerance(eps) {}
 
         bool operator()(T a, T b) { return std::abs(a - b) < tolerance; }
+
+        int sgn(T x) { return this->operator()(x, T(0)) ? 0 : my::sgn(x); }
     };
 
     // 使用上面的随机数生成器生成长度为 n 的随机向量；数字类型由模板参数指定

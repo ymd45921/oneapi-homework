@@ -58,8 +58,218 @@ namespace my {
         }
     }
 
+    // 二维矩阵 RAII 封装
+    template <typename T, int M, int N>
+    class mat {
+        T (*_data)[N];
 
+    public:
+        mat() {
+            _data = new T[M][N];
+        }
 
+        mat(const T (&matrix)[M][N]) {
+            _data = new T[M][N];
+            std::memcpy(_data, matrix, sizeof(T) * M * N);
+        }
+
+        mat(const mat &other) {
+            _data = new T[M][N];
+            std::memcpy(_data, other._data, sizeof(T) * M * N);
+        }
+
+        mat(mat &&other) {
+            _data = other._data;
+            other._data = nullptr;
+        }
+
+        mat &operator=(const mat &other) {
+            if (this != &other) {
+                if (_data == nullptr)
+                    _data = new T[M][N];
+                std::memcpy(_data, other._data, sizeof(T) * M * N);
+            }
+            return *this;
+        }
+
+        mat &operator=(mat &&other) {
+            if (this != &other) {
+                if (_data != nullptr)
+                    delete[] _data;
+                _data = other._data;
+                other._data = nullptr;
+            }
+            return *this;
+        }
+
+        bool operator==(const mat &other) const {
+            return std::memcmp(_data, other._data, sizeof(T) * M * N) == 0;
+        }
+
+        bool operator!=(const mat &other) const {
+            return std::memcmp(_data, other._data, sizeof(T) * M * N) != 0;
+        }
+
+        bool equal(const mat &other, equal<T> &eq) const {
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    if (!eq(_data[i][j], other[i][j]))
+                        return false;
+            return true;
+        }
+
+        mat operator+(const mat &other) const {
+            mat result;
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    result[i][j] = _data[i][j] + other[i][j];
+            return result;
+        }
+
+        mat operator-(const mat &other) const {
+            mat result;
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    result[i][j] = _data[i][j] - other[i][j];
+            return result;
+        }
+
+        template <int P>
+        mat<T, M, P> operator*(const mat<T, N, P> &other) const {
+            mat<T, M, P> result;
+            for (int i = 0; i < M; i++) {
+                for (int j = 0; j < P; j++) {
+                    T sum = 0;
+                    for (int k = 0; k < N; k++)
+                        sum += _data[i][k] * other[k][j];
+                    result[i][j] = sum;
+                }
+            }
+            return result;
+        }
+
+        std::ostream &operator<<(std::ostream &os) const {
+            os << "my::mat(" << M << ", " << N << ") [\n";
+            for (int i = 0; i < M; i++) {
+                os << "  ";
+                for (int j = 0; j < N; j++)
+                    os << _data[i][j] << " ";
+                os << "\n";
+            }
+            os << "]";
+            return os;
+        }
+
+        T operator()(int i, int j) const {
+            return _data[i][j];
+        }
+
+        auto get_offset() const {
+            return [=](int i, int j) { return i * N + j; };
+        }
+
+        ~mat() {
+            if (_data != nullptr)
+                delete[] _data;
+        }
+
+        T *operator[](int i) {
+            return _data[i];
+        }
+
+        const T *operator[](int i) const {
+            return _data[i];
+        }
+
+        void random(rand<T> &rand) {
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    _data[i][j] = rand();
+        }
+
+        void random(T min = 0, T max = 1) {
+            rand<T> rand(min, max);
+            random(rand);
+        }
+
+        T *begin() {
+            return _data[0];
+        }
+
+        T *end() {
+            return _data[0] + M * N;
+        }
+
+        const T *begin() const {
+            return _data[0];
+        }
+
+        const T *end() const {
+            return _data[0] + M * N;
+        }
+
+        const T *cbegin() const {
+            return _data[0];
+        }
+
+        const T *cend() const {
+            return _data[0] + M * N;
+        }
+
+        T *data() {
+            return _data[0];
+        }
+
+        int size() const {
+            return M * N;
+        }
+
+        std::size_t size_of() const {
+            return sizeof(T) * M * N;
+        }
+
+        int rows() const {
+            return M;
+        }
+
+        int cols() const {
+            return N;
+        }
+
+        void fill(T value) {
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    _data[i][j] = value;
+        }
+
+        void memset(int value) {
+            std::memset(_data, value, sizeof(T) * M * N);
+        }
+
+        std::ostream &print_to(std::ostream &os) const {
+            os << "my::mat(" << M << ", " << N << ") [\n";
+            for (int i = 0; i < M; i++) {
+                os << "  ";
+                for (int j = 0; j < N; j++)
+                    os << _data[i][j] << " ";
+                os << "\n";
+            }
+            return os << "]";
+        }
+
+        mat<T, N, M> operator!() const {    // transpose
+            mat<T, N, M> result;
+            for (int i = 0; i < M; i++)
+                for (int j = 0; j < N; j++)
+                    result[j][i] = _data[i][j];
+            return result;
+        }
+    };
+
+    template <typename T, int M, int N>
+    std::ostream &operator<<(std::ostream &os, const mat<float, M, N> &matrix) {
+        return matrix.operator<<(os);
+    }
 }
 
 #endif /* OneAPI_Homework_my_mat_hpp */
